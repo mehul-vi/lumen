@@ -306,7 +306,7 @@ async function createDocumentRecord({ userId, originalName, publicId, secureUrl,
 
   await document.save();
 
-  processDocumentWithAI(document, userId).catch((err) => {
+  await processDocumentWithAI(document, userId).catch((err) => {
     console.error('Background AI processing error:', err);
   });
 
