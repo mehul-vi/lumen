@@ -60,24 +60,43 @@ async function extractTransactionData(text) {
   }
 }
 
+const { GoogleGenAI } = require('@google/genai');
+
 /**
- * Extract text from image using Tesseract.js 
+ * Extract text from image using Gemini 
  */
 async function extractTextFromImage(imagePath) {
   try {
-    let bufferOrUrl = imagePath;
-
-    // If it's a local file path, read it as buffer to avoid path issues
-    if (!imagePath.startsWith('http://') && !imagePath.startsWith('https://')) {
-      const imageBuffer = fs.readFileSync(imagePath);
-      bufferOrUrl = imageBuffer;
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('GEMINI_API_KEY is not set. Falling back to basic parsing or failing.');
+      throw new Error('Please set GEMINI_API_KEY in your .env file to use image upload.');
     }
 
-    const { data: { text } } = await Tesseract.recognize(bufferOrUrl, 'eng');
+    let buffer;
+    let mimeType = 'image/jpeg';
+    
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      const response = await axios.get(imagePath, { responseType: 'arraybuffer' });
+      buffer = Buffer.from(response.data);
+      mimeType = response.headers['content-type'] || 'image/jpeg';
+    } else {
+      buffer = fs.readFileSync(imagePath);
+      if (imagePath.toLowerCase().endsWith('.png')) mimeType = 'image/png';
+    }
 
-    return text;
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        'Extract all the readable text from this receipt/document exactly as it appears. Do not add any extra commentary.',
+        { inlineData: { data: buffer.toString('base64'), mimeType } }
+      ]
+    });
+
+    return response.text;
   } catch (error) {
-    console.error('Image extraction error (Tesseract):', error.message);
+    console.error('Image extraction error (Gemini):', error.message);
     throw new Error('Failed to extract text from image');
   }
 }
