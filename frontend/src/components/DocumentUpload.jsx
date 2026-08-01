@@ -70,7 +70,7 @@ export default function DocumentUpload({ onUploadComplete }) {
       'image/*': ['.png', '.jpg', '.jpeg'],
       'application/pdf': ['.pdf']
     },
-    maxSize: 15 * 1024 * 1024
+    maxSize: 4.5 * 1024 * 1024
   });
 
   const removeFile = (id) => {
@@ -96,7 +96,7 @@ export default function DocumentUpload({ onUploadComplete }) {
             <p className="text-gray-600 mb-2">
               Drag & drop receipts, invoices, or transaction records here
             </p>
-            <p className="text-sm text-gray-500">or click to browse (PDF, PNG, JPG up to 15MB)</p>
+            <p className="text-sm text-gray-500">or click to browse (PDF, PNG, JPG up to 4.5MB)</p>
           </div>
         )}
       </div>
