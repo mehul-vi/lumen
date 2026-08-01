@@ -28,7 +28,7 @@ async function extractTransactionData(text) {
       amount: z.number().default(0).describe("The transaction amount as a number (e.g., 125.50). Must be a number."),
       currency: z.string().default("INR").describe("The currency code (e.g., INR, USD, EUR, default to INR if not found)"),
       type: z.enum(["income", "expense"]).default("expense").describe("The transaction type. Use 'income' for: salary, payment received, refund, deposit, credit, revenue, earnings, bonus, reimbursement, cashback. Use 'expense' for: purchase, bill, payment made, debit, shopping, spending, withdrawal."),
-      category: z.enum(["Groceries", "Shopping", "Food", "Gas", "Utilities", "Transport", "Entertainment", "Healthcare", "Salary", "Other"]).default("Other").describe("The transaction category"),
+      category: z.string().default("Other").describe("The transaction category. Must be one of: Groceries, Shopping, Food, Gas, Utilities, Transport, Entertainment, Healthcare, Salary, Other. If it does not fit perfectly, use 'Other'."),
       date: z.string().describe("The transaction date in ISO format YYYY-MM-DD (e.g., 2024-12-25)"),
       description: z.string().default("").describe("A brief description of the transaction")
     });
@@ -50,7 +50,7 @@ async function extractTransactionData(text) {
       amount: parseFloat(response.amount) || 0,
       currency: response.currency || 'INR',
       type: (response.type && (response.type === 'income' || response.type === 'expense')) ? response.type : 'expense',
-      category: response.category || 'Other',
+      category: ["Groceries", "Shopping", "Food", "Gas", "Utilities", "Transport", "Entertainment", "Healthcare", "Salary", "Other"].includes(response.category) ? response.category : 'Other',
       transactionDate: response.date ? new Date(response.date) : new Date(),
       description: response.description || ''
     };
