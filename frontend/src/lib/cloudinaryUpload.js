@@ -26,7 +26,7 @@ export async function uploadDocumentToCloudinary(file) {
     publicId: uploadResult.public_id,
     secureUrl: uploadResult.secure_url,
     bytes: uploadResult.bytes,
-    originalName: file.name,
+    originalName: file.name || 'document',
     mimeType:
       file.type ||
       (uploadResult.format === 'pdf' ? 'application/pdf' : `image/${uploadResult.format}`)

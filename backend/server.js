@@ -7,15 +7,9 @@ dotenv.config();
 
 const app = express();
 
-// Connect to MongoDB
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (error) {
-    console.error('Database connection failed:', error);
-    res.status(500).json({ success: false, message: 'Database connection failed' });
-  }
+// Connect to MongoDB once
+connectDB().catch(err => {
+  console.error('Initial database connection failed:', err);
 });
 
 // Middleware

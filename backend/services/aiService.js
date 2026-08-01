@@ -109,7 +109,7 @@ async function extractTextFromImage(imagePath, bufferOverride = null, mimeTypeOv
     return text;
   } catch (error) {
     console.error('Image extraction error (Gemini):', error.message);
-    throw new Error('Failed to extract text from image');
+    throw new Error(`Failed to extract text from image: ${error.message}`);
   }
 }
 

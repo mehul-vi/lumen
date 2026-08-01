@@ -210,9 +210,15 @@ export default function Documents() {
                         ? 'bg-red-100 text-red-800'
                         : 'bg-yellow-100 text-yellow-800'
                     }`}
+                    title={doc.status === 'failed' && doc.extractedData?.error ? doc.extractedData.error : ''}
                   >
                     {doc.status}
                   </span>
+                  {doc.status === 'failed' && doc.extractedData?.error && (
+                    <div className="mt-1 text-xs text-red-500 max-w-xs truncate">
+                      {doc.extractedData.error}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center space-x-2 ml-4">
                   <button
