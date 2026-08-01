@@ -6,6 +6,8 @@ const pdf = require('pdf-parse');
 const axios = require('axios');
 const Tesseract = require('tesseract.js');
 
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
+
 // Configure Groq instances
 const getGroqModel = (modelName = "llama-3.3-70b-versatile") => {
   return new ChatGroq({
@@ -65,18 +67,23 @@ const { GoogleGenAI } = require('@google/genai');
 /**
  * Extract text from image using Gemini 
  */
-async function extractTextFromImage(imagePath) {
+async function extractTextFromImage(imagePath, bufferOverride = null, mimeTypeOverride = null) {
   try {
     if (!process.env.GEMINI_API_KEY) {
-      console.warn('GEMINI_API_KEY is not set. Falling back to basic parsing or failing.');
       throw new Error('Please set GEMINI_API_KEY in your .env file to use image upload.');
     }
 
     let buffer;
-    let mimeType = 'image/jpeg';
-    
-    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-      const response = await axios.get(imagePath, { responseType: 'arraybuffer' });
+    let mimeType = mimeTypeOverride || 'image/jpeg';
+
+    if (bufferOverride) {
+      buffer = bufferOverride;
+    } else if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      const response = await axios.get(imagePath, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        maxContentLength: MAX_FILE_SIZE
+      });
       buffer = Buffer.from(response.data);
       mimeType = response.headers['content-type'] || 'image/jpeg';
     } else {
@@ -85,7 +92,7 @@ async function extractTextFromImage(imagePath) {
     }
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
@@ -94,7 +101,12 @@ async function extractTextFromImage(imagePath) {
       ]
     });
 
-    return response.text;
+    const text = (response.text || '').trim();
+    if (!text || text.toLowerCase().includes('no text was found')) {
+      throw new Error('No readable text found in image');
+    }
+
+    return text;
   } catch (error) {
     console.error('Image extraction error (Gemini):', error.message);
     throw new Error('Failed to extract text from image');
@@ -104,18 +116,34 @@ async function extractTextFromImage(imagePath) {
 /**
  * Extract text from PDF using pdf-parse
  */
-async function extractTextFromPDF(pdfPath) {
+async function extractTextFromPDF(pdfPath, bufferOverride = null) {
   try {
     let dataBuffer;
-    if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
-      const response = await axios.get(pdfPath, { responseType: 'arraybuffer' });
+    if (bufferOverride) {
+      dataBuffer = bufferOverride;
+    } else if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
+      const response = await axios.get(pdfPath, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        maxContentLength: MAX_FILE_SIZE
+      });
       dataBuffer = Buffer.from(response.data);
     } else {
       dataBuffer = fs.readFileSync(pdfPath);
     }
+
     const data = await pdf(dataBuffer);
-    if (!data || !data.text) throw new Error('No text extracted from PDF');
-    return data.text;
+    const text = (data?.text || '').trim();
+
+    if (text.length >= 10) {
+      return text;
+    }
+
+    if (process.env.GEMINI_API_KEY) {
+      return extractTextFromImage(pdfPath, dataBuffer, 'application/pdf');
+    }
+
+    throw new Error('No text extracted from PDF');
   } catch (error) {
     console.error('PDF text extraction error:', error.message);
     return '';

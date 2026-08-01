@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Search, FileText, Download, Eye, Trash2, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import DocumentUpload from './DocumentUpload';
-import apiClient from '../lib/apiClient';
+import apiClient, { API_BASE_URL } from '../lib/apiClient';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useRefreshSubscription } from '../hooks/useRefresh';
@@ -14,11 +14,32 @@ export default function Documents() {
   const [deletingId, setDeletingId] = useState(null);
   const debouncedSearch = useDebouncedValue(searchTerm);
   const pollingRef = useRef(null);
-  
-  // Subscribe to refresh events
-  useRefreshSubscription(() => {
-    fetchDocuments(debouncedSearch);
-  });
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) return;
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const response = await apiClient.get('/documents');
+        const docs = response.data.data || [];
+        setDocuments(docs);
+
+        const processingDocs = docs.filter((doc) => doc.status === 'processing');
+        if (processingDocs.length === 0) {
+          stopPolling();
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 3000);
+  }, [stopPolling]);
 
   const fetchDocuments = useCallback(
     async (searchValue = '') => {
@@ -28,12 +49,11 @@ export default function Documents() {
           params: searchValue ? { search: searchValue } : undefined
         });
         setDocuments(response.data.data || []);
-        
-        // Check if any documents are still processing and start polling if needed
-        const processingDocs = response.data.data?.filter(doc => doc.status === 'processing');
-        if (processingDocs.length > 0 && !pollingRef.current) {
+
+        const processingDocs = response.data.data?.filter((doc) => doc.status === 'processing');
+        if (processingDocs?.length > 0) {
           startPolling();
-        } else if (processingDocs.length === 0 && pollingRef.current) {
+        } else {
           stopPolling();
         }
       } catch (error) {
@@ -42,36 +62,13 @@ export default function Documents() {
         setLoading(false);
       }
     },
-    []
+    [startPolling, stopPolling]
   );
-
-  // Polling function to check for document status updates
-  const startPolling = useCallback(() => {
-    if (pollingRef.current) return; // Already polling
-    
-    pollingRef.current = setInterval(async () => {
-      try {
-        const response = await apiClient.get('/documents');
-        const docs = response.data.data || [];
-        setDocuments(docs);
-        
-        // Stop polling if no documents are processing
-        const processingDocs = docs.filter(doc => doc.status === 'processing');
-        if (processingDocs.length === 0) {
-          stopPolling();
-        }
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
-    }, 3000); // Poll every 3 seconds
-  }, []);
-
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  }, []);
+  
+  // Subscribe to refresh events
+  useRefreshSubscription(() => {
+    fetchDocuments(debouncedSearch);
+  });
 
   useEffect(() => {
     fetchDocuments(debouncedSearch);
@@ -80,7 +77,7 @@ export default function Documents() {
     return () => {
       stopPolling();
     };
-  }, [debouncedSearch, fetchDocuments]);
+  }, [debouncedSearch, fetchDocuments, stopPolling]);
 
   const handleView = (id) => {
     try {
@@ -92,7 +89,7 @@ export default function Documents() {
       }
       
       // Create URL with token as query parameter
-      const url = `${import.meta.env.VITE_API_URL}/documents/${id}/view?token=${encodeURIComponent(token)}`;
+      const url = `${API_BASE_URL}/documents/${id}/view?token=${encodeURIComponent(token)}`;
       
       // Open in new tab
       window.open(url, '_blank');
@@ -111,7 +108,7 @@ export default function Documents() {
       }
       
       // Create URL with token as query parameter
-      const url = `${import.meta.env.VITE_API_URL}/documents/${id}/download?token=${encodeURIComponent(token)}`;
+      const url = `${API_BASE_URL}/documents/${id}/download?token=${encodeURIComponent(token)}`;
       
       // Create download link
       const link = document.createElement('a');
@@ -142,6 +139,9 @@ export default function Documents() {
   const handleUploadComplete = (document) => {
     if (document) {
       setDocuments((prev) => [document, ...prev]);
+      if (document.status === 'processing') {
+        startPolling();
+      }
     } else {
       fetchDocuments(debouncedSearch);
     }

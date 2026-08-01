@@ -3,7 +3,11 @@ import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, X, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import apiClient from '../lib/apiClient';
+import { uploadDocumentToCloudinary } from '../lib/cloudinaryUpload';
 import { useRefresh } from '../hooks/useRefresh';
+
+const MAX_FILE_SIZE_MB = 15;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const buildId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -25,19 +29,18 @@ export default function DocumentUpload({ onUploadComplete }) {
       for (const fileObj of files) {
         updateFile(fileObj.id, { status: 'uploading' });
         try {
-          const formData = new FormData();
-          formData.append('file', fileObj.file);
-          const response = await apiClient.post('/documents', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-          updateFile(fileObj.id, { status: 'processed', document: response.data.data });
+          const document = await uploadDocumentToCloudinary(fileObj.file);
+          updateFile(fileObj.id, { status: 'uploaded', document });
           toast.success(`${fileObj.name} uploaded successfully`);
-          onUploadComplete?.(response.data.data);
-          // Trigger refresh for other components
+          onUploadComplete?.(document);
           triggerRefresh();
         } catch (error) {
-          updateFile(fileObj.id, { status: 'failed', error: error.message });
-          toast.error(`${fileObj.name}: ${error.message}`);
+          const message =
+            error.message?.includes('413') || error.message?.toLowerCase().includes('too large')
+              ? `File is too large. Max size is ${MAX_FILE_SIZE_MB}MB`
+              : error.message;
+          updateFile(fileObj.id, { status: 'failed', error: message });
+          toast.error(`${fileObj.name}: ${message}`);
         }
       }
       setProcessing(false);
@@ -50,7 +53,7 @@ export default function DocumentUpload({ onUploadComplete }) {
       if (fileRejections.length > 0) {
         fileRejections.forEach((rejection) => {
           if (rejection.errors[0]?.code === 'file-too-large') {
-            toast.error(`File is too large. Max size is 4.5MB`);
+            toast.error(`File is too large. Max size is ${MAX_FILE_SIZE_MB}MB`);
           } else {
             toast.error(rejection.errors[0]?.message || 'File rejected');
           }
@@ -80,7 +83,7 @@ export default function DocumentUpload({ onUploadComplete }) {
       'image/*': ['.png', '.jpg', '.jpeg'],
       'application/pdf': ['.pdf']
     },
-    maxSize: 4.5 * 1024 * 1024
+    maxSize: MAX_FILE_SIZE_BYTES
   });
 
   const removeFile = (id) => {
@@ -106,7 +109,7 @@ export default function DocumentUpload({ onUploadComplete }) {
             <p className="text-gray-600 mb-2">
               Drag & drop receipts, invoices, or transaction records here
             </p>
-            <p className="text-sm text-gray-500">or click to browse (PDF, PNG, JPG up to 4.5MB)</p>
+            <p className="text-sm text-gray-500">or click to browse (PDF, PNG, JPG up to {MAX_FILE_SIZE_MB}MB)</p>
           </div>
         )}
       </div>
@@ -120,9 +123,13 @@ export default function DocumentUpload({ onUploadComplete }) {
                 <FileText className="h-5 w-5 text-gray-400" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{fileObj.name}</p>
-                  <p className="text-xs text-gray-500">{(fileObj.size / 1024).toFixed(2)} KB</p>
+                  <p className="text-xs text-gray-500">
+                    {fileObj.size >= 1024 * 1024
+                      ? `${(fileObj.size / (1024 * 1024)).toFixed(2)} MB`
+                      : `${(fileObj.size / 1024).toFixed(2)} KB`}
+                  </p>
                 </div>
-                {fileObj.status === 'processed' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                {fileObj.status === 'uploaded' && <CheckCircle className="h-5 w-5 text-green-500" />}
                 {fileObj.status === 'uploading' && <Loader2 className="h-5 w-5 text-primary-500 animate-spin" />}
                 {fileObj.status === 'failed' && <AlertCircle className="h-5 w-5 text-red-500" />}
               </div>

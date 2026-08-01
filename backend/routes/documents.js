@@ -11,6 +11,9 @@ const router = express.Router();
 
 const cloudinary = require('../config/cloudinary');
 
+const UPLOAD_FOLDER = 'financial_docs';
+const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
+
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
 
@@ -28,7 +31,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter
 });
 
@@ -37,7 +40,7 @@ const uploadToCloudinary = (buffer, folder = 'financial_docs') => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        folder: folder,
+        folder,
         resource_type: 'auto'
       },
       (error, result) => {
@@ -48,6 +51,76 @@ const uploadToCloudinary = (buffer, folder = 'financial_docs') => {
     uploadStream.end(buffer);
   });
 };
+
+// Signed upload config for direct browser-to-Cloudinary uploads (bypasses Vercel 4.5MB limit)
+router.get('/upload-signature', auth, (req, res) => {
+  try {
+    const timestamp = Math.round(Date.now() / 1000);
+    const paramsToSign = { timestamp, folder: UPLOAD_FOLDER };
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      process.env.CLOUDINARY_API_SECRET
+    );
+
+    res.json({
+      success: true,
+      data: {
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+        apiKey: process.env.CLOUDINARY_API_KEY,
+        timestamp,
+        signature,
+        folder: UPLOAD_FOLDER
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Register a document after direct Cloudinary upload
+router.post('/register', auth, async (req, res) => {
+  try {
+    const { publicId, secureUrl, bytes, originalName, mimeType } = req.body;
+
+    if (!publicId || !secureUrl || !originalName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required upload metadata'
+      });
+    }
+
+    if (bytes && bytes > MAX_FILE_SIZE) {
+      return res.status(400).json({
+        success: false,
+        message: 'File is too large. Max size is 15MB'
+      });
+    }
+
+    const document = await createDocumentRecord({
+      userId: req.userId,
+      originalName,
+      publicId,
+      secureUrl,
+      bytes: bytes || 0,
+      mimeType: mimeType || 'application/octet-stream'
+    });
+
+    res.status(201).json({
+      success: true,
+      data: document,
+      message: 'Document uploaded successfully. AI processing started.'
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
 
 // Get all documents for current user
 router.get('/', auth, async (req, res) => {
@@ -164,7 +237,29 @@ router.get('/:id/view', auth, async (req, res) => {
 });
 
 // Upload document with AI processing
-router.post('/', auth, upload.single('file'), async (req, res) => {
+router.post('/', auth, (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File is too large. Max size is 15MB'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    if (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -173,25 +268,15 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       });
     }
 
-    // Upload to Cloudinary using helper
     const cloudinaryResult = await uploadToCloudinary(req.file.buffer);
 
-    // Create document record
-    const document = new Document({
-      user: req.userId,
+    const document = await createDocumentRecord({
+      userId: req.userId,
       originalName: req.file.originalname,
-      fileName: cloudinaryResult.public_id, // Store public_id in fileName for deletion
-      filePath: cloudinaryResult.secure_url, // Store Cloudinary URL
-      fileSize: cloudinaryResult.bytes,
-      mimeType: req.file.mimetype,
-      status: 'processing'
-    });
-
-    await document.save();
-
-    // Process document with AI in background
-    processDocumentWithAI(document, req.userId).catch(err => {
-      console.error('Background AI processing error:', err);
+      publicId: cloudinaryResult.public_id,
+      secureUrl: cloudinaryResult.secure_url,
+      bytes: cloudinaryResult.bytes,
+      mimeType: req.file.mimetype
     });
 
     res.status(201).json({
@@ -207,6 +292,26 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     });
   }
 });
+
+async function createDocumentRecord({ userId, originalName, publicId, secureUrl, bytes, mimeType }) {
+  const document = new Document({
+    user: userId,
+    originalName,
+    fileName: publicId,
+    filePath: secureUrl,
+    fileSize: bytes,
+    mimeType,
+    status: 'processing'
+  });
+
+  await document.save();
+
+  processDocumentWithAI(document, userId).catch((err) => {
+    console.error('Background AI processing error:', err);
+  });
+
+  return document;
+}
 
 // Background AI processing function
 async function processDocumentWithAI(document, userId) {
