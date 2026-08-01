@@ -33,7 +33,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/anomalies', require('./routes/anomalies'));
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
 });
 
