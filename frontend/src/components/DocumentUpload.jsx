@@ -46,7 +46,17 @@ export default function DocumentUpload({ onUploadComplete }) {
   );
 
   const onDrop = useCallback(
-    (acceptedFiles) => {
+    (acceptedFiles, fileRejections) => {
+      if (fileRejections.length > 0) {
+        fileRejections.forEach((rejection) => {
+          if (rejection.errors[0]?.code === 'file-too-large') {
+            toast.error(`File is too large. Max size is 4.5MB`);
+          } else {
+            toast.error(rejection.errors[0]?.message || 'File rejected');
+          }
+        });
+      }
+
       if (!acceptedFiles.length) return;
       const newFiles = acceptedFiles.map((file) => ({
         id: buildId(),
